@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="initial-scale=1.0">
+    <meta charset="utf-8">
+
+    
+    <!-- Carrega a API do Google Maps -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCzVNgKjFxrY2VWAS1p_lrS96X4Bo4eEbg&libraries=drawing,geometry,places&callback=initMap" defer></script>
+    <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+
+
+    <style>
+        .container {
+            display: flex;
+        }
+
+        .button-container {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        #map {
+            flex: 2;
+            margin-left: 10px;
+            height: auto; /* Defina a altura do mapa conforme necessário */
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0, 0, 0, 0.4);
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 15% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: auto;
+            height: auto;
+        }
+
+        .close {
+            color: #aaaaaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .close:hover,
+        .close:focus {
+            color: #000;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .button-container button,
+        .button-container label,
+        .button-container select {
+            margin-bottom: 10px;
+            border-radius: 0px;
+            width: 100%;
+            padding: 5px 10px;
+            height: 30px;
+            background-color: darkgreen;
+            color: white;
+        }
+
+        .button-container button.divideShape {
+        background-color: rgb(164, 22, 22); /* Altere a cor desejada para o botão específico */
+    }
+
+    .button-container button.triangleShape {
+        background-color: blue; /* Cor para Triângulos */
+        color: white;
+    }
+
+    .button-container button.squareShape {
+        background-color: orange; /* Cor para Quadrados */
+        color: white;
+    }
+
+    .button-container button.hexagonShape {
+        background-color: rgb(48, 168, 48); /* Cor para Hexágonos */
+        color: white;
+    }
+
+
+        .button-container input[type="number"] {
+            width: 200px;
+            height: 20px;
+            padding: 5px 10px;
+            margin-bottom: 10px;
+            border-radius: 0;
+            color: rgb(0, 0, 0);
+        }
+
+
+    </style>
+
+</head>
+<body>
+    <div class="container">
+        <div class="button-container">
+            <!-- Conteúdo dos botões -->
+            <input id="pac-input" type="text" placeholder="Pesquisar localidade" />
+            <button onclick="enableDrawing()">Desenhar</button>
+            <button onclick="selectAllPolygons()">Selecionar Todos</button>
+            <input type="number" id="customSizeInput" placeholder="Tamanho em hectares">
+            <button onclick="selectSmallPolygons()">Select SizeBased</button>
+            <button onclick="mergePolygons()">Une Poligonos</button>
+            <button onclick="deletePolygons()">Eliminar</button>
+            <select id="uasSelection">
+                <option value="Mini">Mini</option>
+                <option value="Phantom">Phantom</option>
+                <option value="Mavic">Mavic</option>
+                <option value="Matrice">Matrice</option>
+                <option value="AsaFixa">Asa Fixa</option>
+            </select>
+            <button onclick="divideShape()" class="divideShape">Dividir</button>
+            <button id="toggleShapeBtn" onclick="toggleShape()" class="triangleShape">Dividir em Triângulos</button>
+            <input type="number" id="numPilotsInput" min="1" placeholder="Número de pilotos">
+            <button onclick="divideShapeByPilots()">DividePilotsPizzaSlice</button>
+            <button onclick="dividePartesIguais()">DividePilotosUnf</button>
+            <button id="downloadKmlButton">Download KML</button>
+            <button onclick="openDatabasePage()">Base de Dados de Polígonos</button>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <!-- Modal -->
+    <div id="hectares-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <p>Definir dimensão em Hectares:</p>
+            <input type="number">
+            <input type="number" id="hectares-input">
+            <button onclick="setHectares()">Definir</button>
+        </div>
+    </div>
+<!-- Parte 1: Inicializar o mapa funções pesquisa--- Inicio Javascript --> 
+
+<script>
+
+let divideMode = false;
+
+   function initialize() {
+    // Declare a variável map no escopo global
+    let map;
+    
+}
+
+//Inicializa Mapa
+function initMap() {
+        map = new google.maps.Map(document.getElementById('map'), {
+            center: {lat: -34.397, lng: 150.644},
+            zoom: 10,
+            streetViewControl: true
+        });
+        addSearchBox(map);
+    }
+    
+    // Chama a função initMap quando a janela carregar
+    document.addEventListener('DOMContentLoaded', function () {
+    initMap();
+});
+
+    // Adiciona a pesquisa no mapa
+    function addSearchBox(map) {
+        const input = document.getElementById('pac-input');
+        const searchBox = new google.maps.places.SearchBox(input);
+    
+        map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
+    
+        map.addListener('bounds_changed', function() {
+            searchBox.setBounds(map.getBounds());
+        });
+    
+        searchBox.addListener('places_changed', function() {
+            const places = searchBox.getPlaces();
+    
+            if (places.length == 0) {
+                return;
+            }
+    
+            const bounds = new google.maps.LatLngBounds();
+            places.forEach(function(place) {
+                if (!place.geometry) {
+                    console.log('Returned place contains no geometry');
+                    return;
+                }
+                bounds.extend(place.geometry.location);
+            });
+            map.fitBounds(bounds);
+        });
+    }
+
+//Parte 2: Desenha e seleciona polígonos e retangulos e Marcadores ---------------------------------------------------------------------------
+  
+    let polygons = [];
+    let divideInTriangles = true;
+    let currentOverlay = null;
+    let drawingManager;
+    let selectedPolygons = [];
+
+
+    //Desenho de poligonos e conversão de retangulos em poligonos
+    function enableDrawing() {
+  if (!drawingManager) {
+    // Se o drawingManager ainda não foi criado, cria
+    drawingManager = new google.maps.drawing.DrawingManager({
+      drawingMode: null,
+      drawingControl: true,
+      drawingControlOptions: {
+        position: google.maps.ControlPosition.TOP_CENTER,
+        drawingModes: [
+          google.maps.drawing.OverlayType.POLYGON,
+          google.maps.drawing.OverlayType.RECTANGLE,
+          google.maps.drawing.OverlayType.MARKER, 
+        ],
+      },
+      polygonOptions: {
+        strokeWeight: 2,
+        clickable: true,
+        editable: true,
+        zIndex: 1,
+        draggable: true,
+        fillColor: '#FF0000',
+        fillOpacity: 0.35,
+        isSelected: false,
+      },
+      rectangleOptions: {
+        strokeWeight: 2,
+        clickable: true,
+        editable: true,
+        zIndex: 1,
+        draggable: true,
+        fillColor: '#FF0000',
+        fillOpacity: 0.35,
+        strokeColor: 'black', // Define a cor da borda para preto
+        isSelected: false,
+      },
+      markerOptions: { 
+        draggable: true,
+        clickable: true,
+      },
+    });
+
+    google.maps.event.addListener(drawingManager, 'overlaycomplete', function (event) {
+      if (event.type === google.maps.drawing.OverlayType.POLYGON) {
+        addPolygonClickListener(event.overlay);
+        polygons.push(event.overlay);
+        setSelectedPolygon(event.overlay);
+
+
+      } else if (event.type === google.maps.drawing.OverlayType.RECTANGLE) {
+        // Converte o retângulo em um polígono
+        const bounds = event.overlay.getBounds();
+        const southWest = bounds.getSouthWest();
+        const northEast = bounds.getNorthEast();
+        const northWest = new google.maps.LatLng(northEast.lat(), southWest.lng());
+        const southEast = new google.maps.LatLng(southWest.lat(), northEast.lng());
+        const polygon = new google.maps.Polygon({
+        paths: [southWest, northWest, northEast, southEast],
+          strokeWeight: 2,
+          clickable: true,
+          editable: true,
+          zIndex: 1,
+          draggable: true,
+          fillColor: '#FF0000',
+          fillOpacity: 0.35,
+          strokeColor: '#000000', // Define a cor da borda para preto
+          isSelected: false,
+        });
+        
+        // Adiciona o polígono à lista de polígonos
+        converteRetangulo(polygon.getPath().getArray());
+
+        // Remove o retângulo do mapa
+        event.overlay.setMap(null);
+
+
+      } else if (event.type === google.maps.drawing.OverlayType.MARKER) {
+        // Adiciono depois a minha condição para os Markers
+      }
+      
+      drawingManager.setDrawingMode(null);
+    });
+  }
+  // Ativa o drawingManager
+  drawingManager.setMap(map);
+}
+
+
+// Habilita a seleção de polígonos
+function addPolygonClickListener(polygon) {
+  polygon.addListener('click', function () {
+    if (polygon.isSelected) {
+      // polígono já está selecionado, então altera para a cor original
+      polygon.setOptions({ fillColor: '#FF0000' });
+      polygon.isSelected = false;
+      selectedPolygons = selectedPolygons.filter(p => p !== polygon); // remove o polígono selecionado
+    } else {
+      // polígono ainda não está selecionado, então altera para a cor de seleção
+      polygon.setOptions({ fillColor: '#00FF00' });
+      polygon.isSelected = true;
+      // Adiciona o polígono selecionado
+     selectedPolygons.push(polygon);
+    }
+  });
+}
+
+// Desabilita o desenho de polígonos
+function disableDrawing() {
+  drawingManager.setMap(null);
+}
+
+// Remove a seleção de um polígono
+function removePolygonListeners() {
+  polygons.forEach(function (polygon) {
+    google.maps.event.clearListeners(polygon, 'click');
+    polygon.setOptions({ fillColor: '#FF0000' });
+    polygon.isSelected = false;
+  });
+  selectedPolygons = [];
+}
+
+// Define o polígono selecionado
+function setSelectedPolygon(polygon) {
+    // Verifica se o polígono clicado já está selecionado
+    let index = selectedPolygons.indexOf(polygon);
+    if (index > -1) {
+        // Se o polígono já está selecionado, remova-o da lista de selecionados
+        selectedPolygons.splice(index, 1);
+
+        // Altera a aparência do polígono para indicar que ele não está mais selecionado
+        polygon.setOptions({ fillColor: '#FF0000' });
+        polygon.isSelected = false;
+    } else {
+        // Se o polígono não está selecionado, adicione-o à lista de selecionados
+        selectedPolygons.push(polygon);
+
+        // Altera a aparência do polígono para indicar que ele está selecionado
+        polygon.setOptions({ fillColor: '#00FF00' });
+        polygon.isSelected = true;
+    }
+}
+
+
+// Elimina os polígonos selecionados
+function deletePolygons() {
+    if (selectedPolygons.length > 0) {
+        for (let i = 0; i < selectedPolygons.length; i++) {
+            selectedPolygons[i].setMap(null);
+            let polygonIndex = polygons.indexOf(selectedPolygons[i]);
+            if (polygonIndex > -1) {
+                polygons.splice(polygonIndex, 1);
+            }
+        }
+        selectedPolygons = []; // Limpa a lista de polígonos selecionados
+    }
+}
+
+
+//Seleciona todos os Poligonos no Mapa
+function selectAllPolygons() {
+  polygons.forEach((polygon) => {
+    polygon.setOptions({ fillColor: '#00FF00' });
+    polygon.isSelected = true;
+    selectedPolygons.push(polygon);
+  });
+}
+
+//Seleciona poligonos com base no tamanho em hectares definido na janela
+function selectSmallPolygons() {
+    // Obtem o valor da caixa de entrada customSizeInput. Em Hectares
+    const maxArea = parseFloat(document.getElementById('customSizeInput').value);
+
+    // Verifica se o valor inserido é um número. Se não for, apresenta uma mensagem de erro e termina a função.
+    if (isNaN(maxArea)) {
+        alert('Por favor, insira um número válido na caixa customSizeInput.');
+        return;
+    }
+
+    // Converte a área máxima para metros quadrados, pois a função computeArea devolve a área em metros quadrados.
+    const maxAreaM2 = maxArea * 10000;
+
+    polygons.forEach((polygon) => {
+        const area = google.maps.geometry.spherical.computeArea(polygon.getPath());
+
+        if (area < maxAreaM2) {
+            setSelectedPolygon(polygon);
+        }
+    });
+}
+
+// Adiciona polígonos ao mapa
+function addPolygonToMap(coordinates) {
+  const polygon = new google.maps.Polygon({
+    paths: coordinates,
+    strokeColor: '#FF0000',
+    strokeOpacity: 0.8,
+    strokeWeight: 2,
+    fillColor: '#FF0000',
+    fillOpacity: 0.35,
+    editable: true,
+    draggable: true,
+    clickable: true,
+    isSelected: false // adiciona uma propriedade isSelected
+  });
+
+  polygon.setMap(map);
+  addPolygonClickListener(polygon); // chama a função addPolygonClickListener para adicionar o listener de clique
+  polygons.push(polygon);
+}
+
+//Definição especifica da conversão de retangulo em poligono
+function converteRetangulo(coordinates) {
+  const polygon = new google.maps.Polygon({
+    paths: coordinates,
+    strokeColor: '#000000',
+    strokeOpacity: 0.8,
+    strokeWeight: 2,
+    fillColor: '#FF0000',
+    fillOpacity: 0.35,
+    editable: true,
+    draggable: true,
+    clickable: true,
+    isSelected: false // adiciona uma propriedade isSelected
+  });
+  polygon.setMap(map);
+  addPolygonClickListener(polygon); // chama a função addPolygonClickListener para adicionar o listener de clique
+  setSelectedPolygon(polygon);
+  polygons.push(polygon);
+}
+
+
+// ´Parte 3  -  Cálculos Automaticos e operações de divisão e Geoometria 
+
+
+//Recebe o tamanho do quadrado
+function getQuadSize() {
+    const customSizeInput = parseFloat(document.getElementById('customSizeInput').value);
+    if (!isNaN(customSizeInput)) {
+        return customSizeInput;
+    }
+
+    const selectedUAS = document.getElementById('uasSelection').value;
+    switch (selectedUAS) {
+        case 'Mini':
+            return 5;
+        case 'Phantom':
+            return 10;
+        case 'Mavic':
+            return 25;
+        case 'Matrice':
+            return 30;
+        case 'AsaFixa':
+            return 100;
+        default:
+            return 5;
+    }
+}
+
+//Cálcula os Limites do Poligono Original
+
+function getPolygonBounds(polygon) {
+    let minLat = Number.POSITIVE_INFINITY;
+    let maxLat = Number.NEGATIVE_INFINITY;
+    let minLng = Number.POSITIVE_INFINITY;
+    let maxLng = Number.NEGATIVE_INFINITY;
+
+    polygon.forEach(vertex => {
+        minLat = Math.min(minLat, vertex.lat());
+        maxLat = Math.max(maxLat, vertex.lat());
+        minLng = Math.min(minLng, vertex.lng());
+        maxLng = Math.max(maxLng, vertex.lng());
+    });
+
+    return { minLat, maxLat, minLng, maxLng };
+}
+
+
+// Divide o Polígono ou Retângulo para triagulos ou Quadrados
+
+   let divideInShape = 'triangles';
+
+   function toggleShape() {
+    const toggleShapeBtn = document.getElementById('toggleShapeBtn');
+    if (divideInShape === 'triangles') {
+        divideInShape = 'squares';
+        toggleShapeBtn.textContent = 'Dividir em Quadrados';
+        toggleShapeBtn.classList.remove('triangleShape');
+        toggleShapeBtn.classList.add('squareShape');
+    } else if (divideInShape === 'squares') {
+        divideInShape = 'hexagons';
+        toggleShapeBtn.textContent = 'Dividir em Hexágonos';
+        toggleShapeBtn.classList.remove('squareShape');
+        toggleShapeBtn.classList.add('hexagonShape');
+    } else {
+        divideInShape = 'triangles';
+        toggleShapeBtn.textContent = 'Dividir em Triângulos';
+        toggleShapeBtn.classList.remove('hexagonShape');
+        toggleShapeBtn.classList.add('triangleShape');
+    }
+}
+
+
+//Divide Poligonos (Chama funções Triangulos, Quadrados ou Hexágonos, mas antes impõe Condições)
+function divideShape() {
+    if (selectedPolygons.length === 0) {
+        alert('Por favor, selecione uma forma primeiro.');
+        return;
+    }
+
+    if (selectedPolygons.length !== 1) {
+        alert('Apenas um polígono pode ser dividido de cada vez.');
+        return;
+    }
+
+    const polygon = selectedPolygons[0];
+
+    if (!(polygon instanceof google.maps.Polygon) && !(polygon instanceof google.maps.Rectangle)) {
+        alert('O objeto selecionado não é um polígono válido.');
+        return;
+    }
+
+    if (google.maps.geometry.spherical.computeArea(polygon.getPath()) === 0) {
+        alert('A forma selecionada não pode ser dividida porque não tem área.');
+        return;
+    }
+
+    for (let polygon of selectedPolygons) {
+        if (divideInShape === 'triangles') {
+            divideShapeInTriangles(polygon);
+        } else if (divideInShape === 'squares') {
+            divideShapeInSquares(polygon);
+        } else {
+            divideShapeInHexagons(polygon);
+        }
+    }
+}
+
+//Função que efetua a Divisão em Triangulos 
+
+function divideShapeInTriangles(polygon) {
+    if (!polygon) {
+        alert('Por favor, selecione uma forma primeiro.');
+        return;
+    }
+
+    let originalCoordinates;
+
+    if (polygon instanceof google.maps.Polygon) {
+        originalCoordinates = polygon.getPath().getArray();
+    } else if (polygon instanceof google.maps.Rectangle) {
+        const bounds = polygon.getBounds();
+        const southWest = bounds.getSouthWest();
+        const northEast = bounds.getNorthEast();
+        const northWest = new google.maps.LatLng(northEast.lat(), southWest.lng());
+        const southEast = new google.maps.LatLng(southWest.lat(), northEast.lng());
+        originalCoordinates = [southWest, northWest, northEast, southEast, southWest];
+    } else {
+        alert('Tipo de forma não suportado.');
+        return;
+    }
+
+    const area = google.maps.geometry.spherical.computeArea(originalCoordinates);
+    const areaInHectares = area * 0.0001;
+
+    if (areaInHectares < 5) {
+        alert('A área da forma é menor que 5 hectares e não pode ser dividida.');
+        return;
+    }
+
+    let quadSize = getQuadSize();
+    quadSize = Math.min(quadSize, areaInHectares); //Limita a dividir pelo tamanho do poligono original
+
+    const bounds = getPolygonBounds(originalCoordinates);
+
+    const southWest = [bounds.minLng, bounds.minLat];
+    const northEast = [bounds.maxLng, bounds.maxLat];
+    const bbox = southWest.concat(northEast);
+
+    const cellSize = Math.sqrt(quadSize * 10000);
+    const cellWidth = cellSize;
+    const cellHeight = cellSize;
+
+    const triangleGridOptions = {
+        units: 'meters',
+        properties: {}
+    };
+
+    const triangleGrid = turf.triangleGrid(bbox, cellWidth, triangleGridOptions);
+    const originalPolygonTurf = turf.polygon([
+        [
+            ...originalCoordinates.map((coord) => [coord.lng(), coord.lat()]),
+            [originalCoordinates[0].lng(), originalCoordinates[0].lat()],
+        ],
+    ]);
+
+    let triangleCount = 0;
+    let minTriangleArea = Infinity;
+    let maxTriangleArea = 0;
+
+    triangleGrid.features.forEach((feature) => {
+        const intersection = turf.intersect(feature, originalPolygonTurf);
+        if (intersection && intersection.geometry.type === 'Polygon') {
+            const clippedCoordinates = intersection.geometry.coordinates[0].map((coordinate) => {
+                return new google.maps.LatLng(coordinate[1], coordinate[0]);
+            });
+
+            // Fechar o polígono adicionando o primeiro ponto novamente no final
+            clippedCoordinates.push(clippedCoordinates[0]);
+
+            addPolygonToMap(clippedCoordinates);
+            triangleCount++;
+            const triangleArea = google.maps.geometry.spherical.computeArea(clippedCoordinates) * 0.0001;
+            minTriangleArea = Math.min(minTriangleArea, triangleArea);
+            maxTriangleArea = Math.max(maxTriangleArea, triangleArea);
+        }
+    });
+
+    deletePolygons();
+    alert(`O seu polígono foi dividido em ${triangleCount} triângulos de aproximadamente ${(quadSize).toFixed(2)} hectares, sendo a área do triângulo mais pequeno ${minTriangleArea.toFixed(2)} hectares e a área do triângulo maior ${maxTriangleArea.toFixed(2)} hectares. Obrigado.`);
+}
+
+//função que efetua a divisão em quadrados 
+
+function divideShapeInSquares(polygon) {
+    if (!polygon) {
+        alert('Por favor, selecione uma forma primeiro.');
+        return;
+    }
+
+    let originalCoordinates;
+
+    if (polygon instanceof google.maps.Polygon) {
+        originalCoordinates = polygon.getPath().getArray();
+    } else if (polygon instanceof google.maps.Rectangle) {
+        const bounds = polygon.getBounds();
+        const southWest = bounds.getSouthWest();
+        const northEast = bounds.getNorthEast();
+        const northWest = new google.maps.LatLng(northEast.lat(), southWest.lng());
+        const southEast = new google.maps.LatLng(southWest.lat(), northEast.lng());
+        originalCoordinates = [southWest, northWest, northEast, southEast, southWest];
+    } else {
+        alert('Tipo de forma não suportado.');
+        return;
+    }
+
+    const area = google.maps.geometry.spherical.computeArea(originalCoordinates);
+    const areaInHectares = area * 0.0001;
+
+    if (areaInHectares < 5) {
+        alert('A área da forma é menor que 5 hectares e não pode ser dividida.');
+        return;
+    }
+
+    let quadSize = getQuadSize();
+    //quadSize = Math.min(quadSize, areaInHectares); //Limita a dividir por area do  poligono original
+
+    const bounds = getPolygonBounds(originalCoordinates);
+
+    const southWest = [bounds.minLng, bounds.minLat];
+    const northEast = [bounds.maxLng, bounds.maxLat];
+    const bbox = southWest.concat(northEast);
+
+    const cellSize = Math.sqrt(quadSize * 10000);
+
+    const squareGridOptions = {
+        units: 'meters',
+        properties: {}
+    };
+
+    const squareGrid = turf.squareGrid(bbox, cellSize, squareGridOptions);
+    const originalPolygonTurf = turf.polygon([
+        [
+            ...originalCoordinates.map((coord) => [coord.lng(), coord.lat()]),
+            [originalCoordinates[0].lng(), originalCoordinates[0].lat()],
+        ],
+    ]);
+
+    let squareCount = 0;
+    let minSquareArea = Infinity;
+    let maxSquareArea = 0;
+
+    squareGrid.features.forEach((feature) => {
+        const intersection = turf.intersect(feature, originalPolygonTurf);
+        if (intersection && intersection.geometry.type === 'Polygon') {
+            const clippedCoordinates = intersection.geometry.coordinates[0].map((coordinate) => {
+                return new google.maps.LatLng(coordinate[1], coordinate[0]);
+            });
+
+            // Fechar o polígono adicionando o primeiro ponto novamente no final
+            clippedCoordinates.push(clippedCoordinates[0]);
+
+            addPolygonToMap(clippedCoordinates);
+            squareCount++;
+            const squareArea = google.maps.geometry.spherical.computeArea(clippedCoordinates) * 0.0001;
+            minSquareArea = Math.min(minSquareArea, squareArea);
+            maxSquareArea = Math.max(maxSquareArea, squareArea);
+        }
+    });
+
+    deletePolygons();
+    alert(`O seu polígono foi dividido em ${squareCount} quadrados de aproximadamente ${(quadSize).toFixed(2)} hectares, sendo a área do quadrado mais pequeno ${minSquareArea.toFixed(2)} hectares e a área do quadrado maior ${maxSquareArea.toFixed(2)} hectares. Obrigado.`);
+}
+
+//Divide o poligono em hexágonos
+function divideShapeInHexagons(polygon) {
+    if (!polygon) {
+        alert('Por favor, selecione uma forma primeiro.');
+        return;
+    }
+
+    let originalCoordinates;
+
+    if (polygon instanceof google.maps.Polygon) {
+        originalCoordinates = polygon.getPath().getArray();
+    } else if (polygon instanceof google.maps.Rectangle) {
+        const bounds = polygon.getBounds();
+        const southWest = bounds.getSouthWest();
+        const northEast = bounds.getNorthEast();
+        const northWest = new google.maps.LatLng(northEast.lat(), southWest.lng());
+        const southEast = new google.maps.LatLng(southWest.lat(), northEast.lng());
+        originalCoordinates = [southWest, northWest, northEast, southEast, southWest];
+    } else {
+        alert('Tipo de forma não suportado.');
+        return;
+    }
+
+    const area = google.maps.geometry.spherical.computeArea(originalCoordinates);
+    const areaInHectares = area * 0.0001;
+
+    if (areaInHectares < 5) {
+        alert('A área da forma é menor que 5 hectares e não pode ser dividida.');
+        return;
+    }
+
+    let quadSize = getQuadSize();
+    quadSize = Math.min(quadSize, areaInHectares); //Limita a metade da area do poligono original
+
+    const bounds = getPolygonBounds(originalCoordinates);
+
+    const southWest = [bounds.minLng, bounds.minLat];
+    const northEast = [bounds.maxLng, bounds.maxLat];
+
+    const bbox = southWest.concat(northEast);
+
+    // Calcular o comprimento do lado do hexágono com base na área desejada
+    const cellSize = Math.sqrt((2 * quadSize * 10000) / (3 * Math.sqrt(3)));
+
+    const hexGridOptions = {
+        units: 'meters',
+        properties: {}
+    };
+
+    // Cria a grelha de hexágonos
+    const hexGrid = turf.hexGrid(bbox, cellSize, hexGridOptions);
+
+    const originalPolygonTurf = turf.polygon([
+        [
+            ...originalCoordinates.map((coord) => [coord.lng(), coord.lat()]),
+            [originalCoordinates[0].lng(), originalCoordinates[0].lat()],
+        ],
+    ]);
+
+    let hexagonCount = 0;
+    let minHexagonArea = Infinity;
+    let maxHexagonArea = 0;
+
+    hexGrid.features.forEach((feature) => {
+        const intersection = turf.intersect(feature, originalPolygonTurf);
+        if (intersection && intersection.geometry.type === 'Polygon') {
+            const clippedCoordinates = intersection.geometry.coordinates[0].map((coordinate) => {
+                return new google.maps.LatLng(coordinate[1], coordinate[0]);
+            });
+
+            // Fechar o polígono adicionando o primeiro ponto novamente no final
+            clippedCoordinates.push(clippedCoordinates[0]);
+
+            addPolygonToMap(clippedCoordinates);
+            hexagonCount++;
+            const hexagonArea = google.maps.geometry.spherical.computeArea(clippedCoordinates) * 0.0001;
+            minHexagonArea = Math.min(minHexagonArea, hexagonArea);
+            maxHexagonArea = Math.max(maxHexagonArea, hexagonArea);
+        }
+    });
+
+    deletePolygons();
+    alert(`O seu polígono foi dividido em ${hexagonCount} hexágonos de aproximadamente ${(quadSize).toFixed(2)} hectares, sendo a área do hexágono mais pequeno ${minHexagonArea.toFixed(2)} hectares e a área do hexágono maior ${maxHexagonArea.toFixed(2)} hectares. Obrigado.`);
+}
+
+    
+//Divide em numeros iguais por numero de piloto (função para retangulos ou quadrados)
+function dividePolygonIntoEqualParts(polygon, numberOfPilots) {
+    if (!polygon || numberOfPilots < 1) {
+        alert('Por favor, forneça um polígono válido e o número de pilotos.');
+        return;
+    }
+
+    function dividePolygonInHalf(polygon) {
+    const boundingBox = turf.bbox(polygon);
+    const width = boundingBox[2] - boundingBox[0];
+    const height = boundingBox[3] - boundingBox[1];
+
+    let lineToSplit;
+
+    if (width > height) {
+        // If the polygon is wider than it is tall, split it vertically.
+        const midX = (boundingBox[0] + boundingBox[2]) / 2;
+        lineToSplit = turf.lineString([[midX, boundingBox[1]], [midX, boundingBox[3]]]);
+    } else {
+        // If the polygon is taller than it is wide, split it horizontally.
+        const midY = (boundingBox[1] + boundingBox[3]) / 2;
+        lineToSplit = turf.lineString([[boundingBox[0], midY], [boundingBox[2], midY]]);
+    }
+
+    const split = turf.lineSplit(polygon, lineToSplit);
+
+    const polygons = split.features.map(feature => {
+        return turf.coordAll(feature).map(coord => {
+            return new google.maps.LatLng(coord[1], coord[0]);
+        });
+    });
+
+    return polygons;
+}
+
+    if (numberOfPilots === 2) {
+        return dividePolygonInHalf(polygon);
+    }
+
+    const originalCoordinates = polygon.getPath().getArray();
+    const originalPolygonTurf = turf.polygon([
+        [
+            ...originalCoordinates.map((coord) => [coord.lng(), coord.lat()]),
+            [originalCoordinates[0].lng(), originalCoordinates[0].lat()],
+        ],
+    ]);
+
+    const center = turf.center(originalPolygonTurf);
+    const centerPoint = new google.maps.LatLng(center.geometry.coordinates[1], center.geometry.coordinates[0]);
+
+    let subPolygons = [];
+
+    for (let i = 0; i < numberOfPilots; i++) {
+        const startBearing = (360 / numberOfPilots) * i;
+        const endBearing = (360 / numberOfPilots) * (i + 1);
+
+        const outerEdgeStartPoint = turf.destination(center, 1000, startBearing, { units: 'kilometers' });
+        const outerEdgeEndPoint = turf.destination(center, 1000, endBearing, { units: 'kilometers' });
+
+        const sliceCoords = [
+            centerPoint,
+            new google.maps.LatLng(outerEdgeStartPoint.geometry.coordinates[1], outerEdgeStartPoint.geometry.coordinates[0]),
+            new google.maps.LatLng(outerEdgeEndPoint.geometry.coordinates[1], outerEdgeEndPoint.geometry.coordinates[0]),
+            centerPoint,
+        ];
+
+        const sliceTurf = turf.polygon([
+            [
+                ...sliceCoords.map((coord) => [coord.lng(), coord.lat()]),
+                [sliceCoords[0].lng(), sliceCoords[0].lat()],
+            ],
+        ]);
+
+        const clippedSlice = turf.intersect(sliceTurf, originalPolygonTurf);
+        if (clippedSlice && clippedSlice.geometry.type === 'Polygon') {
+            const clippedCoordinates = clippedSlice.geometry.coordinates[0].map((coordinate) => {
+                return new google.maps.LatLng(coordinate[1], coordinate[0]);
+            });
+
+            clippedCoordinates.push(clippedCoordinates[0]);
+            subPolygons.push(clippedCoordinates);
+        }
+    }
+
+    return subPolygons;
+}
+
+//Chamada no botão para converter. (Pilotos By Num)
+
+function divideShapeByPilots() {
+  const numberOfPilotsInput = document.getElementById('numPilotsInput');
+  const numberOfPilots = parseInt(numberOfPilotsInput.value, 10);
+
+  if (isNaN(numberOfPilots) || numberOfPilots < 1) {
+    alert('Por favor, insira um número válido de pilotos.');
+    return;
+  }
+
+  const subPolygons = [];
+
+  selectedPolygons.forEach((polygon) => {
+    let originalPolygon;
+
+    if (polygon instanceof google.maps.Polygon) {
+      originalPolygon = polygon;
+    } else if (polygon instanceof google.maps.Rectangle) {
+      const bounds = polygon.getBounds();
+      const southWest = bounds.getSouthWest();
+      const northEast = bounds.getNorthEast();
+      const northWest = new google.maps.LatLng(northEast.lat(), southWest.lng());
+      const southEast = new google.maps.LatLng(southWest.lat(), northEast.lng());
+
+      originalPolygon = new google.maps.Polygon({
+        paths: [southWest, northWest, northEast, southEast],
+      });
+    } else {
+      alert('Tipo de forma não suportado.');
+      return;
+    }
+
+    const subPolygonsForCurrentPolygon = dividePolygonIntoEqualParts(originalPolygon, numberOfPilots);
+
+    subPolygonsForCurrentPolygon.forEach((subPolygonCoords) => {
+      subPolygons.push(subPolygonCoords);
+    });
+  });
+
+  subPolygons.forEach((subPolygonCoords) => {
+    addPolygonToMap(subPolygonCoords);
+  });
+
+  deletePolygons();
+}
+
+
+//Parte 4 Armazenamento e Partilha --------------------------------------------------------------------------------------------------------------------------------------------------------
+
+    // Função para abrir a página da base de dados de polígonos
+    function openDatabasePage() {
+        // Implementação futura
+    }
+
+
+//KML Manipulação
+document.getElementById('downloadKmlButton').addEventListener('click', downloadSelectedPolygonsAsKML);
+
+
+    async function downloadSelectedPolygonsAsKML() {
+  if (selectedPolygons.length === 0) {
+    alert('Nenhum polígono selecionado.');
+    return;
+  }
+    const zip = new JSZip();
+
+    selectedPolygons.forEach((polygon, index) => {
+        let kmlContent = '<?xml version="1.0" encoding="UTF-8"?>\n' +
+            '<kml xmlns="http://www.opengis.net/kml/2.2">\n' +
+            '<Document>\n';
+
+        const path = polygon.getPath();
+        let coordinatesKml = '';
+
+        path.forEach((latLng) => {
+            coordinatesKml += `${latLng.lng()},${latLng.lat()},0 `;
+        });
+
+        kmlContent += `<Placemark>\n` +
+            `<name>Flight${index + 1}</name>\n` +
+            `<Style>\n` +
+            `<LineStyle>\n` +
+            `<color>ff0000ff</color>\n` + // Red color for border line
+            `</LineStyle>\n` +
+            `<PolyStyle>\n` +
+            `<color>5900ff00</color>\n` + // Green color with 35% opacity for polygon
+            `</PolyStyle>\n` +
+            `</Style>\n` +
+            `<Polygon>\n` +
+            `<outerBoundaryIs>\n` +
+            `<LinearRing>\n` +
+            `<coordinates>\n` +
+            `${coordinatesKml}\n` +
+            `</coordinates>\n` +
+            `</LinearRing>\n` +
+            `</outerBoundaryIs>\n` +
+            `</Polygon>\n` +
+            `</Placemark>\n`;
+
+        kmlContent += '</Document>\n</kml>';
+
+        zip.file(`RelieffMapperFlight${index + 1}.kml`, kmlContent);
+    });
+
+    const blob = await zip.generateAsync({type: "blob"});
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'RelieffMapperFlightPlans.zip';
+    link.click();
+}
+
+//Não Implementado (Testes)----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+function mergePolygons() {
+    if (selectedPolygons.length < 2) {
+        alert('Por favor, selecione pelo menos dois polígonos para unir.');
+        return;
+    }
+
+    const polygonsInTurfFormat = selectedPolygons.map(polygon => {
+        let pathArray = polygon.getPath().getArray().map(coord => {
+            return [coord.lng(), coord.lat()];
+        });
+        // Certifique-se de que o primeiro e o último ponto são iguais
+        if(pathArray[0][0] !== pathArray[pathArray.length - 1][0] || pathArray[0][1] !== pathArray[pathArray.length - 1][1]) {
+            pathArray.push(pathArray[0]);
+        }
+        return turf.polygon([pathArray]);
+    });
+
+    // Função para verificar se dois polígonos estão próximos
+    function arePolygonsClose(poly1, poly2) {
+        for (let coord1 of poly1.geometry.coordinates[0]) {
+            for (let coord2 of poly2.geometry.coordinates[0]) {
+                if (turf.distance(coord1, coord2, {units: 'meters'}) <= 25) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Cria um array para armazenar os grupos de polígonos
+    let polygonGroups = [];
+    polygonsInTurfFormat.forEach(polygon => {
+        let addedToGroup = false;
+        for (let group of polygonGroups) {
+            if (arePolygonsClose(group[group.length - 1], polygon)) {
+                group.push(polygon);
+                addedToGroup = true;
+                break;
+            }
+        }
+        if (!addedToGroup) {
+            polygonGroups.push([polygon]);
+        }
+    });
+
+    // Remove os polígonos originais selecionados
+    deletePolygons();
+
+    polygonGroups.forEach(polygonsToBeMerged => {
+        let mergedPolygon;
+        try {
+            mergedPolygon = polygonsToBeMerged.reduce((merged, polygon) => turf.union(merged, polygon));
+        } catch (error) {
+            alert('Não foi possível unir todos os polígonos selecionados. Certifique-se de que os polígonos estejam se sobrepondo ou estejam suficientemente próximos.');
+            return;
+        }
+
+        const newCoordinates = mergedPolygon.geometry.coordinates[0].map(coord => {
+            return new google.maps.LatLng(coord[1], coord[0]);
+        });
+
+        // Fechar o polígono adicionando o primeiro ponto novamente no final
+        newCoordinates.push(newCoordinates[0]);
+
+        // Adiciona o novo polígono ao mapa
+        converteRetangulo(newCoordinates);
+    });
+
+    alert('Os polígonos selecionados foram unidos com sucesso.');
+}
+
+
+//Teste2------------------------
+
+
+function dividePartesIguais() {
+    let numPilots = document.getElementById('numPilotsInput').value;
+
+    if (selectedPolygons.length < numPilots) {
+        alert('Por favor, selecione mais polígonos.');
+        return;
+    }
+
+    // Converter polígonos selecionados para o formato Turf.js
+    const polygonsInTurfFormat = selectedPolygons.map(polygon => {
+        let pathArray = polygon.getPath().getArray().map(coord => {
+            return [coord.lng(), coord.lat()];
+        });
+
+        // Certifique-se de que o primeiro e o último ponto são iguais
+        if(pathArray[0][0] !== pathArray[pathArray.length - 1][0] || pathArray[0][1] !== pathArray[pathArray.length - 1][1]) {
+            pathArray.push(pathArray[0]);
+        }
+
+        return turf.polygon([pathArray]);
+    });
+
+    // Calcular a área total dos polígonos selecionados
+    let totalArea = 0;
+    for (let polygon of polygonsInTurfFormat) {
+        totalArea += turf.area(polygon);
+    }
+
+    // Calcular a área de cada novo polígono
+    let newPolygonArea = totalArea / numPilots;
+
+    let mergedPolygons = [];
+    let currentPolygonArea = 0;
+    let currentPolygon = [];
+
+    for (let polygon of polygonsInTurfFormat) {
+        let polygonArea = turf.area(polygon);
+
+        if (currentPolygonArea + polygonArea <= newPolygonArea) {
+            // Adicionar o polígono atual ao polígono em construção
+            currentPolygon.push(polygon);
+            currentPolygonArea += polygonArea;
+        } else {
+            // O polígono atual excede a área desejada. Finalize o polígono atual e comece um novo
+            mergedPolygons.push(currentPolygon.reduce((merged, polygon) => turf.union(merged, polygon)));
+            currentPolygon = [polygon];
+            currentPolygonArea = polygonArea;
+        }
+    }
+
+    // Tratar o último polígono
+    if (currentPolygon.length > 0) {
+        mergedPolygons.push(currentPolygon.reduce((merged, polygon) => turf.union(merged, polygon)));
+    }
+
+    // Remover os polígonos originais
+    deletePolygons();
+
+    // Adicionar os novos polígonos ao mapa
+    for (let mergedPolygon of mergedPolygons) {
+    let newCoordinates = mergedPolygon.geometry.coordinates[0].filter(coord => {
+        // Verifica se as coordenadas são números finitos
+        let isValid = Number.isFinite(coord[0]) && Number.isFinite(coord[1]);
+        if (!isValid) {
+            console.log("Coordenadas inválidas encontradas:", coord);
+        }
+        return isValid;
+    }).map(coord => {
+        let latLng = new google.maps.LatLng(coord[1], coord[0]);
+        if (!(latLng instanceof google.maps.LatLng)) {
+            console.log("Falha ao criar LatLng:", latLng);
+        }
+        return latLng;
+    });
+
+    // Fechar o polígono adicionando o primeiro ponto novamente no final
+    if (newCoordinates.length > 0) {
+        newCoordinates.push(newCoordinates[0]);
+
+        // Adicionar o novo polígono ao mapa
+        converteRetangulo(newCoordinates);
+    } else {
+        console.log("Não foi possível criar um polígono com as coordenadas fornecidas:", newCoordinates);
+    }
+}
+
+    alert('Os polígonos selecionados foram divididos com sucesso.');
+}
+
+//Teste 3
+
+
+//logica paara o meu logotipo depois
+/*
+let marker = new google.maps.Marker({
+    position: myLatLng,
+    map: map,
+    icon: {
+        url: "http://example.com/path/to/image.png",
+        scaledSize: new google.maps.Size(50, 50)
+    },
+    title: 'Ponto de Partida'
+});
+*/
+
+</script>
+</body>
+</html>
