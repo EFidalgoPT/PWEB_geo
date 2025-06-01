@@ -4,9 +4,15 @@
     <meta name="viewport" content="initial-scale=1.0">
     <meta charset="utf-8">
 
-    
     <!-- Carrega a API do Google Maps -->
-    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCzVNgKjFxrY2VWAS1p_lrS96X4Bo4eEbg&libraries=drawing,geometry,places&callback=initMap" defer></script>
+     <!-- Config com a API Key -->
+<script src="config.js"></script>
+
+<!-- Injeta dinamicamente a API do Google Maps -->
+<script>
+  document.write('<script src="https://maps.googleapis.com/maps/api/js?key=' 
+    + CONFIG.GOOGLE_MAPS_API_KEY + '&libraries=drawing,geometry,places&callback=initMap" defer><\/script>');
+</script>
     <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
 
@@ -132,7 +138,7 @@
             <button onclick="divideShapeByPilots()">DividePilotsPizzaSlice</button>
             <button onclick="dividePartesIguais()">DividePilotosUnf</button>
             <button id="downloadKmlButton">Download KML</button>
-            <button onclick="openDatabasePage()">Base de Dados de Polígonos</button>
+            <!-- Botão para abrir a página da base de dados de polígonos removido por nao estar a guncionalidade implementada -->
         </div>
         <div id="map"></div>
     </div>
@@ -940,9 +946,9 @@ function divideShapeByPilots() {
 //Parte 4 Armazenamento e Partilha --------------------------------------------------------------------------------------------------------------------------------------------------------
 
     // Função para abrir a página da base de dados de polígonos
-    function openDatabasePage() {
+    //function openDatabasePage() {
         // Implementação futura
-    }
+    //}
 
 
 //KML Manipulação
