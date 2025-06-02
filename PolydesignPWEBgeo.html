@@ -10,8 +10,13 @@
 
 <!-- Injeta dinamicamente a API do Google Maps -->
 <script>
-  document.write('<script src="https://maps.googleapis.com/maps/api/js?key=' 
-    + CONFIG.GOOGLE_MAPS_API_KEY + '&libraries=drawing,geometry,places&callback=initMap" defer><\/script>');
+  window.addEventListener('load', function () {
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${CONFIG.GOOGLE_MAPS_API_KEY}&libraries=drawing,geometry,places&callback=initMap`;
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
+  });
 </script>
     <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
@@ -163,17 +168,44 @@ let divideMode = false;
     let map;
     
 }
+let map; // Variável global
 
-//Inicializa Mapa
+// Função para inicializar o mapa (Com WMS para PWEB)
 function initMap() {
-        map = new google.maps.Map(document.getElementById('map'), {
-            center: {lat: -34.397, lng: 150.644},
-            zoom: 10,
-            streetViewControl: true
-        });
-        addSearchBox(map);
-    }
-    
+    map = new google.maps.Map(document.getElementById('map'), {
+        center: { lat: 56, lng: 10 },
+        zoom: 7,
+        streetViewControl: true
+    });
+
+    addSearchBox(map);
+
+    // Apenas adiciona a camada WMS com os pontos
+    const wmsMapType = new google.maps.ImageMapType({
+        getTileUrl: function (coord, zoom) {
+            const proj = map.getProjection();
+            const zfactor = Math.pow(2, zoom);
+
+            const top = proj.fromPointToLatLng(
+                new google.maps.Point(coord.x * 256 / zfactor, coord.y * 256 / zfactor)
+            );
+            const bot = proj.fromPointToLatLng(
+                new google.maps.Point((coord.x + 1) * 256 / zfactor, (coord.y + 1) * 256 / zfactor)
+            );
+
+            const bbox = `${top.lng()},${bot.lat()},${bot.lng()},${top.lat()}`;
+
+            return `http://localhost:8080/geoserver/Geozones/wms?service=WMS&version=1.1.0&request=GetMap&layers=Geozones:NFZ_Deenmark_Points&bbox=${bbox}&width=256&height=256&srs=EPSG:4326&format=image/png&transparent=true`;
+        },
+        tileSize: new google.maps.Size(256, 256),
+        name: 'WMS Points',
+        maxZoom: 19
+    });
+
+    map.overlayMapTypes.insertAt(1, wmsMapType);
+}
+
+
     // Chama a função initMap quando a janela carregar
     document.addEventListener('DOMContentLoaded', function () {
     initMap();
@@ -304,7 +336,6 @@ function initMap() {
   // Ativa o drawingManager
   drawingManager.setMap(map);
 }
-
 
 // Habilita a seleção de polígonos
 function addPolygonClickListener(polygon) {
