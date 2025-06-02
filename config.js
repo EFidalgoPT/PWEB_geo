@@ -1,3 +1,0 @@
-const CONFIG = {
-  GOOGLE_MAPS_API_KEY: "AIzaSyCzVNgKjFxrY2VWAS1p_lrS96X4Bo4eEbg"
-};
